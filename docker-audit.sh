@@ -18,6 +18,7 @@
 #
 # Schweregrade: KRITISCH > HOCH > MITTEL > NIEDRIG
 # Exit-Code: 0 = keine KRITISCH/HOCH-Befunde, 3 = mind. ein solcher Befund
+#            oder ein nicht auswertbarer Container
 # =====================================================================
 # (kein "set -u": bash 4.3 auf SLES 12 behandelt leere Arrays sonst als Fehler)
 export LC_ALL=C
@@ -196,15 +197,33 @@ host_checks() {
 # --------------------------------------------------------------------
 # Container-Pruefungen
 # --------------------------------------------------------------------
-FMT='{{.Name}}|{{.Config.Image}}|{{.State.Running}}|{{.State.Pid}}|{{.Config.User}}|{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{.HostConfig.PidMode}}|{{.HostConfig.IpcMode}}|{{.HostConfig.UsernsMode}}|{{.HostConfig.ReadonlyRootfs}}|{{join .HostConfig.CapAdd ","}}|{{join .HostConfig.CapDrop ","}}|{{join .HostConfig.SecurityOpt ","}}|{{.HostConfig.Memory}}|{{.HostConfig.PidsLimit}}|{{range .Mounts}}{{.Source}}:{{.Destination}}:{{if .RW}}rw{{else}}ro{{end}},{{end}}|{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}}:{{.HostPort}}->{{$p}},{{end}}{{end}}|{{len .HostConfig.Devices}}'
+# Hinweis: Felder, die null sein koennen (z. B. bei docker-compose), sind mit
+# {{if}} abgesichert - 'len'/'join' auf null bricht das Template sonst ab.
+FMT='{{.Name}}|{{.Config.Image}}|{{.State.Running}}|{{.State.Pid}}|{{.Config.User}}|{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{.HostConfig.PidMode}}|{{.HostConfig.IpcMode}}|{{.HostConfig.UsernsMode}}|{{.HostConfig.ReadonlyRootfs}}|{{if .HostConfig.CapAdd}}{{join .HostConfig.CapAdd ","}}{{end}}|{{if .HostConfig.CapDrop}}{{join .HostConfig.CapDrop ","}}{{end}}|{{if .HostConfig.SecurityOpt}}{{join .HostConfig.SecurityOpt ","}}{{end}}|{{.HostConfig.Memory}}|{{.HostConfig.PidsLimit}}|{{range .Mounts}}{{.Source}}:{{.Destination}}:{{if .RW}}rw{{else}}ro{{end}},{{end}}|{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}}:{{.HostPort}}->{{$p}},{{end}}{{end}}|{{if .HostConfig.Devices}}{{len .HostConfig.Devices}}{{else}}0{{end}}'
 
 DANGEROUS_CAPS=" ALL SYS_ADMIN SYS_MODULE SYS_PTRACE SYS_RAWIO SYS_BOOT SYS_TIME DAC_READ_SEARCH NET_ADMIN MAC_ADMIN MAC_OVERRIDE BPF PERFMON "
-N_CONT=0; N_RUN=0; N_ROOT=0
+N_CONT=0; N_RUN=0; N_ROOT=0; N_ERR=0
 ROOT_LIST=()
 
 audit_container() {
   local id=$1 line
-  line=$(docker inspect --format "$FMT" "$id" 2>/dev/null) || return
+  if ! line=$(docker inspect --format "$FMT" "$id" 2>&1); then
+    # Nie stillschweigend ueberspringen: Fehler sichtbar melden
+    local cname err f
+    cname=$(docker inspect --format '{{.Name}}' "$id" 2>/dev/null); cname=${cname#/}
+    [ -n "$cname" ] || cname=${id:0:12}
+    err=$(printf '%s' "$line" | tr '\n' ' ')
+    N_CONT=$((N_CONT + 1)); N_ERR=$((N_ERR + 1))
+    if [ "$MODE" = report ]; then
+      printf '\n>>> %s  [NICHT AUSWERTBAR]\n  %-11s %s\n' "$cname" "[FEHLER]" "docker inspect fehlgeschlagen: $err"
+    else
+      for f in "$HOST" "$OS" "$DVER" "$USERNS" "$cname" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "FEHLER"; do
+        csvq "$f"; printf ';'
+      done
+      csvq "docker inspect fehlgeschlagen: $err"; printf '\n'
+    fi
+    return
+  fi
   local name image running pid user priv netmode pidmode ipcmode usernsmode rofs \
         capadd capdrop secopt mem pids mounts ports ndev
   IFS='|' read -r name image running pid user priv netmode pidmode ipcmode usernsmode rofs \
@@ -395,8 +414,9 @@ if [ "$MODE" = report ]; then
   out "=================================================================="
   out "  Container gesamt: $N_CONT  (laufend: $N_RUN)"
   out "  Als root:         $N_ROOT ${ROOT_LIST[*]:+-> ${ROOT_LIST[*]}}"
+  [ "$N_ERR" -gt 0 ] && out "  NICHT AUSWERTBAR: $N_ERR Container (siehe [FEHLER] oben) - bitte melden!"
   out "  Befunde:          KRITISCH=${TOTAL[KRITISCH]}  HOCH=${TOTAL[HOCH]}  MITTEL=${TOTAL[MITTEL]}  NIEDRIG=${TOTAL[NIEDRIG]}"
 fi
 
-[ $(( ${TOTAL[KRITISCH]} + ${TOTAL[HOCH]} )) -gt 0 ] && exit 3
+[ $(( ${TOTAL[KRITISCH]} + ${TOTAL[HOCH]} + N_ERR )) -gt 0 ] && exit 3
 exit 0
