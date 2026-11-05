@@ -3,17 +3,17 @@
 ## 1. Bestandsaufnahme
 
 ```bash
-# einzelner Server
-ssh root@server 'bash -s' < docker-audit.sh
+# Skript auf dem Server abgelegt (z. B. im eigenen Home), Aufruf mit sudo
+sudo bash ~/docker-audit.sh
+sudo bash ~/docker-audit.sh > ~/docker-audit-$(hostname -s).txt        # Bericht in Datei
+sudo bash ~/docker-audit.sh --csv > ~/docker-audit-$(hostname -s).csv  # CSV (Trennzeichen ';')
 
-# alle Server (hosts.txt: ein Host pro Zeile)
-./collect.sh hosts.txt            # als root
-./collect.sh hosts.txt admin      # als admin mit sudo NOPASSWD
+# oder remote, ohne das Skript auf den Server zu kopieren
+ssh root@server 'bash -s' < docker-audit.sh
 ```
 
-Ergebnis: `audit-JJJJMMTT/<host>.txt` mit je einem Bericht pro Server und
-`alle-container.csv` mit allen Containern aller Server. Die CSV lässt sich in
-Excel öffnen und filtern (Trennzeichen `;`).
+Die CSV-Ausgaben mehrerer Server lassen sich zu einer Datei zusammenfügen
+(bei weiteren Servern `--csv --no-header`) und in Excel filtern.
 
 **So erkennt das Skript Root-Container:** Es liest die *tatsächliche* UID des
 Container-Hauptprozesses auf dem Host aus `/proc/<pid>/status`. Die Angabe in

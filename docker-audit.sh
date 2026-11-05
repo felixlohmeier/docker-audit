@@ -8,6 +8,7 @@
 # Container-Prozesse. Benoetigt root (Docker-Socket, /proc fremder PIDs).
 #
 # Aufruf:
+#   sudo bash docker-audit.sh                Klartext-Bericht (ohne chmod +x)
 #   sudo ./docker-audit.sh                   Klartext-Bericht
 #   sudo ./docker-audit.sh --csv             CSV (eine Zeile je Container)
 #   sudo ./docker-audit.sh --csv --no-header
@@ -18,7 +19,8 @@
 #
 # Schweregrade: KRITISCH > HOCH > MITTEL > NIEDRIG
 # Exit-Code: 0 = keine KRITISCH/HOCH-Befunde, 3 = mind. ein solcher Befund
-#            oder ein nicht auswertbarer Container
+#            oder ein nicht auswertbarer Container, 1 = Abbruch (kein root,
+#            Docker nicht installiert, Dienst nicht aktiv/nicht erreichbar)
 # =====================================================================
 # (kein "set -u": bash 4.3 auf SLES 12 behandelt leere Arrays sonst als Fehler)
 export LC_ALL=C
@@ -39,6 +41,13 @@ HOST=$(hostname -f 2>/dev/null || hostname)
 die() { echo "[$HOST] FEHLER: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ]              || die "Bitte als root ausfuehren (sudo)."
 command -v docker >/dev/null 2>&1 || die "docker ist nicht installiert."
+# Vor jedem Zugriff auf docker.sock: laeuft der Dienst? Sonst wuerde eine
+# aktive docker.socket-Unit den Daemon (und Container mit Restart-Policy)
+# per Socket-Aktivierung starten. Ohne systemd gibt es keine Socket-Aktivierung.
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl is-active --quiet docker.service || \
+    die "Docker-Dienst ist nicht aktiv (systemctl is-active docker: $(systemctl is-active docker.service 2>/dev/null)). Abbruch, um keinen Start per Socket-Aktivierung auszuloesen."
+fi
 DOCKER_INFO=$(docker info 2>&1)   || die "Docker-Daemon nicht erreichbar."
 
 # --------------------------------------------------------------------
