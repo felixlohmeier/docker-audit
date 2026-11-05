@@ -8,9 +8,16 @@ sudo bash ~/docker-audit.sh
 sudo bash ~/docker-audit.sh > ~/docker-audit-$(hostname -s).txt        # Bericht in Datei
 sudo bash ~/docker-audit.sh --csv > ~/docker-audit-$(hostname -s).csv  # CSV (Trennzeichen ';')
 
-# oder remote, ohne das Skript auf den Server zu kopieren
-ssh root@server 'bash -s' < docker-audit.sh
+# remote, ohne das Skript auf den Server zu kopieren
+ssh root@server 'bash -s' < docker-audit.sh                                  # als root
+ssh user@server 'sudo -n bash -s' < docker-audit.sh                          # sudo ohne Passwort (NOPASSWD)
+ssh -t user@server "sudo bash -c $(printf '%q' "$(cat docker-audit.sh)")"    # sudo mit Passwortabfrage
 ```
+
+Bei `bash -s` ist die Standardeingabe schon durch das Skript belegt; sudo kann dort kein Passwort
+abfragen. Die letzte Variante übergibt das Skript deshalb als Argument, und `-t` stellt ein Terminal für die
+Passwortabfrage bereit. Ihre Ausgabe enthält Windows-Zeilenenden und die Passwortabfrage selbst. Für
+einen Bericht in einer Datei besser die NOPASSWD-Variante oder den Aufruf auf dem Server nutzen.
 
 Die CSV-Ausgaben mehrerer Server lassen sich zu einer Datei zusammenfügen
 (bei weiteren Servern `--csv --no-header`) und in Excel filtern.
